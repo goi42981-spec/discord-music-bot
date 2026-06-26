@@ -13,6 +13,7 @@
     "discord.js": "^14.26.4",
     "libsodium-wrappers": "^0.8.4",
     "opusscript": "^0.1.1",
-    "youtubei.js": "^17.1.0"
+    "youtubei.js": "^17.1.0",
+    "play-dl": "^1.9.7"
   }
 }
