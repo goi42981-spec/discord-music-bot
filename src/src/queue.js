@@ -119,40 +119,34 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-function getDirectUrl(url) {
+// Внутренний метод для запуска одиночного процесса yt-dlp с переданными аргументами
+function runYtdlpSingle(url, config) {
   return new Promise((resolve, reject) => {
-    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
-      return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
-    }
-
-    // Революционный обход детекции ботов: используем embedded-версии клиентов YouTube.
-    // Клиенты 'android_embedded' и 'web_embedded' предназначены для iframe воспроизведения
-    // и практически никогда не выдают капчу или требование войти в аккаунт.
-    const clientType = 'youtube:player_client=android_embedded,web_embedded,tvhtml5,mediaconnect';
-
-    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-
     const args = [
-      '--extractor-args', `${clientType}`,
-      '--user-agent', userAgent,
+      '--extractor-args', config.client,
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
       '--quiet',
       '--no-warnings',
-      '--ignore-no-formats-error',
     ];
     
-    // Поддержка прокси в yt-dlp, если переменная задана в окружении
+    // Динамический выбор User-Agent в зависимости от типа клиента
+    const isMobile = config.client.includes('ios') || (config.client.includes('android') && !config.client.includes('embedded'));
+    const userAgent = isMobile
+      ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+      
+    args.push('--user-agent', userAgent);
+
+    if (config.useCookies && cookiesPath) {
+      args.push('--cookies', cookiesPath);
+    }
+    
     if (process.env.YT_PROXY) {
       args.push('--proxy', process.env.YT_PROXY);
     }
     
-    if (cookiesPath) {
-      args.push('--cookies', cookiesPath);
-    }
-    
-    // Ссылка идет последней
     args.push(url);
     
     const proc = spawn('yt-dlp', args);
@@ -164,13 +158,68 @@ function getDirectUrl(url) {
     
     proc.on('close', (code) => {
       const directUrl = data.trim().split('\n')[0];
-      if (code !== 0 || !directUrl) {
-        reject(new Error(errData.trim() || `yt-dlp завершился с кодом ${code}`));
+      // Ссылка должна быть непустой и начинаться с протокола http
+      if (code !== 0 || !directUrl || !directUrl.startsWith('http')) {
+        reject(new Error(errData.trim() || `yt-dlp не вернул валидный URL (код завершения: ${code})`));
       } else {
         resolve(directUrl);
       }
     });
     proc.on('error', reject);
+  });
+}
+
+function getDirectUrl(url) {
+  return new Promise(async (resolve, reject) => {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
+    }
+
+    // Список стратегий получения ссылки по приоритету
+    const strategies = [];
+
+    // Стратегия 1: Обычные веб-клиенты с использованием куки (если куки добавлены)
+    if (cookiesPath) {
+      strategies.push({
+        client: 'youtube:player_client=web,tv,ios',
+        useCookies: true,
+        desc: 'Веб/ТВ-клиенты с авторизацией (куки)'
+      });
+    }
+
+    // Стратегия 2: Встроенные (Embedded) клиенты (отличный обход блокировок без куки)
+    strategies.push({
+      client: 'youtube:player_client=android_embedded,web_embedded,mediaconnect',
+      useCookies: false,
+      desc: 'Встроенные embedded-клиенты (без авторизации)'
+    });
+
+    // Стратегия 3: Запасной мобильный обходной путь
+    strategies.push({
+      client: 'youtube:player_client=ios,android,tv',
+      useCookies: !!cookiesPath,
+      desc: 'Мобильный резервный клиент'
+    });
+
+    let lastError = null;
+
+    // Пытаемся запустить стратегии поочередно
+    for (const strategy of strategies) {
+      try {
+        console.log(`[yt-dlp] Пробуем стратегию: ${strategy.desc}`);
+        const directUrl = await runYtdlpSingle(url, strategy);
+        if (directUrl) {
+          console.log(`[yt-dlp] Успешно получена ссылка через стратегию: ${strategy.desc}`);
+          return resolve(directUrl);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`[yt-dlp] Ошибка стратегии "${strategy.desc}": ${err.message}`);
+      }
+    }
+
+    // Если ни одна стратегия не сработала
+    reject(new Error(lastError ? lastError.message : 'Все доступные стратегии обхода YouTube завершились неудачей.'));
   });
 }
 
