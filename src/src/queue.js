@@ -62,13 +62,14 @@ async function getCobaltUrl(url) {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     },
-    body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'best' }),
+    body: JSON.stringify({ url, downloadMode: 'audio' }),
   });
-  if (!res.ok) throw new Error(`cobalt.tools вернул ${res.status}`);
-  const data = await res.json();
-  console.log('[cobalt] статус:', data.status);
+  const body = await res.text();
+  console.log('[cobalt] ответ:', res.status, body);
+  if (!res.ok) throw new Error(`cobalt.tools ${res.status}: ${body}`);
+  const data = JSON.parse(body);
   if (data.url) return data.url;
-  throw new Error(`cobalt.tools: неожиданный ответ: ${JSON.stringify(data)}`);
+  throw new Error(`cobalt.tools неожиданный ответ: ${body}`);
 }
 
 async function createStream(url) {
