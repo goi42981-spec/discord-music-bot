@@ -109,12 +109,20 @@ function getDirectUrl(url) {
       return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
     }
 
-    // Оптимизированный набор аргументов для минимизации вероятности детекции ботов:
-    // 1. Пробуем перебирать клиенты по приоритету (ios -> android -> tv -> web).
-    // 2. Добавляем фейковый User-Agent, чтобы не идентифицировать себя как робот-скрипт.
+    // Динамическая адаптация параметров под наличие куки:
+    // 1. Если куки загружены (они экспортированы из десктопного браузера) -> используем web-клиент и десктопный UA.
+    // 2. Если куки нет -> маскируемся под мобильный клиент (ios, android), которые реже требуют капчу.
+    const clientType = cookiesPath 
+      ? 'youtube:player_client=web,tv' 
+      : 'youtube:player_client=ios,android,tv';
+
+    const userAgent = cookiesPath
+      ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
     const args = [
-      '--extractor-args', 'youtube:player_client=ios,android,tv;player_skip_fallback=info',
-      '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+      '--extractor-args', `${clientType};player_skip_fallback=info`,
+      '--user-agent', userAgent,
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
