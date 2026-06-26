@@ -9,20 +9,39 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
-import { writeFileSync } from 'fs';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 let _yt = null;
+
+// Инициализация Innertube с поддержкой куки (чтобы метаданные тоже не блокировались)
 async function getYt() {
-  if (!_yt) _yt = await Innertube.create({ retrieve_player: true });
+  if (!_yt) {
+    const config = { retrieve_player: true };
+    if (process.env.YT_COOKIES) {
+      config.cookie = process.env.YT_COOKIES;
+    }
+    _yt = await Innertube.create(config);
+  }
   return _yt;
 }
 
+// Запись куки во временный файл для yt-dlp
 let cookiesPath = null;
 if (process.env.YT_COOKIES) {
-  cookiesPath = join('/tmp', 'yt-cookies.txt');
-  writeFileSync(cookiesPath, process.env.YT_COOKIES);
-  console.log('✅ YouTube cookies загружены.');
+  try {
+    const tempDir = '/tmp';
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
+    }
+    cookiesPath = join(tempDir, 'yt-cookies.txt');
+    writeFileSync(cookiesPath, process.env.YT_COOKIES);
+    console.log('✅ YouTube cookies успешно загружены в среду окружения и сохранены в файл.');
+  } catch (err) {
+    console.error('❌ Ошибка при сохранении куки-файла:', err.message);
+  }
+} else {
+  console.warn('⚠️ Внимание: Переменная окружения YT_COOKIES не задана. Возможны ошибки авторизации!');
 }
 
 function extractVideoId(url) {
@@ -66,24 +85,33 @@ export async function getPlaylistInfo(url) {
 
 function getDirectUrl(url) {
   return new Promise((resolve, reject) => {
+    // Использование клиента "ios,android" вместо "web", так как мобильные API реже блокируются капчей
     const args = [
-      '--extractor-args', 'youtube:player_client=android,web',
+      '--extractor-args', 'youtube:player_client=ios,android',
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
       '--quiet',
+      '--no-warnings',
     ];
-    if (cookiesPath) args.push('--cookies', cookiesPath);
-    args.push(url);
+    if (cookiesPath) {
+      args.push('--cookies', cookiesPath);
+    }
+    
     const proc = spawn('yt-dlp', args);
     let data = '';
     let errData = '';
+    
     proc.stdout.on('data', (d) => { data += d; });
     proc.stderr.on('data', (d) => { errData += d; });
+    
     proc.on('close', (code) => {
       const directUrl = data.trim().split('\n')[0];
-      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
-      else resolve(directUrl);
+      if (code !== 0 || !directUrl) {
+        reject(new Error(errData.trim() || `yt-dlp завершился с кодом ${code}`));
+      } else {
+        resolve(directUrl);
+      }
     });
     proc.on('error', reject);
   });
@@ -133,7 +161,7 @@ async function playNext(guildId) {
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     queue.player.play(resource);
   } catch (err) {
-    console.error('Ошибка стрима:', err.message);
+    console.error('Ошибка воспроизведения трека:', err.message);
     queue.textChannel?.send(`❌ Не удалось воспроизвести: **${track.title}**. Пропускаю...`).catch(() => {});
     playNext(guildId);
   }
