@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     && python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install yt-dlp \
+    && /opt/venv/bin/pip install --upgrade yt-dlp \
     && ln -s /opt/venv/bin/yt-dlp /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
