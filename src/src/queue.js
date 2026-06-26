@@ -55,26 +55,24 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-async function getCobaltUrl(url) {
-  const res = await fetch('https://api.cobalt.tools/', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({ url, downloadMode: 'audio' }),
-  });
-  const body = await res.text();
-  console.log('[cobalt] ответ:', res.status, body);
-  if (!res.ok) throw new Error(`cobalt.tools ${res.status}: ${body}`);
-  const data = JSON.parse(body);
-  if (data.url) return data.url;
-  throw new Error(`cobalt.tools неожиданный ответ: ${body}`);
+async function getStreamUrl(url) {
+  const yt = await getYt();
+  const videoId = extractVideoId(url);
+  if (!videoId) throw new Error('Не удалось извлечь ID видео.');
+  const info = await yt.getInfo(videoId);
+  const formats = info.streaming_data?.adaptive_formats ?? [];
+  const audioFormats = formats.filter(f => f.mime_type?.startsWith('audio/'));
+  if (audioFormats.length === 0) throw new Error('Нет аудио форматов.');
+  audioFormats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
+  const best = audioFormats[0];
+  const streamUrl = best.url;
+  if (!streamUrl) throw new Error('URL аудио не найден.');
+  console.log('[stream] youtubei URL получен');
+  return streamUrl;
 }
 
 async function createStream(url) {
-  const audioUrl = await getCobaltUrl(url);
-  console.log('[stream] URL получен, запускаю ffmpeg...');
+  const audioUrl = await getStreamUrl(url);
   const ffmpeg = spawn('ffmpeg', [
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
     '-i', audioUrl,
@@ -119,56 +117,4 @@ async function playNext(guildId) {
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     queue.player.play(resource);
   } catch (err) {
-    console.error('Ошибка стрима:', err.message);
-    queue.textChannel?.send(`❌ Не удалось воспроизвести: **${track.title}**. Пропускаю...`).catch(() => {});
-    playNext(guildId);
-  }
-}
-
-export async function addToQueue(interaction, voiceChannel, tracks) {
-  const guildId = interaction.guild.id;
-  const queue = getQueue(guildId);
-  queue.textChannel = interaction.channel;
-  if (!queue.connection) {
-    queue.connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId, adapterCreator: interaction.guild.voiceAdapterCreator });
-    queue.connection.on('error', (err) => console.error('[voice error]', err.message));
-    try {
-      await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-    } catch (err) {
-      queue.connection.destroy();
-      queues.delete(guildId);
-      throw new Error('Не удалось подключиться к голосовому каналу.');
-    }
-    queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      try {
-        await Promise.race([
-          entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
-        ]);
-      } catch { deleteQueue(guildId); }
-    });
-    queue.player = createAudioPlayer();
-    queue.connection.subscribe(queue.player);
-    queue.player.on(AudioPlayerStatus.Idle, () => playNext(guildId));
-    queue.player.on('error', (err) => { console.error('Ошибка плеера:', err.message); playNext(guildId); });
-  }
-  for (const track of tracks) queue.tracks.push(track);
-  if (!queue.playing) playNext(guildId);
-}
-
-export function skipCurrent(guildId) {
-  const queue = queues.get(guildId);
-  if (!queue || !queue.player) return false;
-  queue.player.stop();
-  return true;
-}
-
-export function cancelQueue(guildId) {
-  const queue = queues.get(guildId);
-  if (!queue) return false;
-  queue.tracks = [];
-  try { queue.player?.stop(true); } catch {}
-  queue.playing = false;
-  setTimeout(() => deleteQueue(guildId), 1000);
-  return true;
-}
+    console.error
