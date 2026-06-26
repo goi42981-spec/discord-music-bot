@@ -55,27 +55,12 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-function getDirectUrl(url) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('yt-dlp', [
-      '--extractor-args', 'youtube:player_client=android',
-      '--no-playlist',
-      '-f', 'bestaudio/best',
-      '--get-url',
-      '--quiet',
-      url,
-    ]);
-    let data = '';
-    let errData = '';
-    proc.stdout.on('data', (d) => { data += d; });
-    proc.stderr.on('data', (d) => { errData += d; });
-    proc.on('close', (code) => {
-      const directUrl = data.trim().split('\n')[0];
-      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
-      else resolve(directUrl);
-    });
-    proc.on('error', reject);
-  });
+async function getDirectUrl(url) {
+  const yt = await getYt();
+  const videoId = extractVideoId(url);
+  const info = await yt.getInfo(videoId);
+  const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+  return format.decipher(yt.session.player);
 }
 
 async function createStream(url) {
