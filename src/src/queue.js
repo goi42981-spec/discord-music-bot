@@ -15,12 +15,10 @@ const COOKIES_PATH = '/tmp/yt-cookies.txt';
 if (process.env.YOUTUBE_COOKIES) {
   try {
     writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
-    console.log('✅ Куки записаны, длина:', process.env.YOUTUBE_COOKIES.length);
+    console.log('✅ Куки записаны');
   } catch(e) {
     console.error('❌ Ошибка записи куков:', e.message);
   }
-} else {
-  console.log('⚠️ YOUTUBE_COOKIES не найден в переменных окружения');
 }
 
 let _yt = null;
@@ -71,6 +69,8 @@ export async function getPlaylistInfo(url) {
 function getDirectUrl(url) {
   return new Promise((resolve, reject) => {
     const args = [
+      '--extractor-args', 'youtube:player_client=android',
+      '--js-runtimes', 'node',
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
@@ -126,7 +126,7 @@ async function playNext(guildId) {
   if (!queue) return;
   if (queue.tracks.length === 0) {
     queue.playing = false;
-    queue.textChannel?.send('✅ Очередь закончилась. Бувай, козаче!').catch(() => {});
+    queue.textChannel?.send('✅ Очередь закончилась. Пока!').catch(() => {});
     setTimeout(() => { const q = queues.get(guildId); if (q && !q.playing && q.tracks.length === 0) deleteQueue(guildId); }, 60000);
     return;
   }
