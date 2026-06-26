@@ -34,12 +34,18 @@ function parseNetscapeCookies(cookieText) {
     .join('; ');
 }
 
-// Инициализация Innertube с поддержкой куки (преобразованных в валидный заголовок)
+// Инициализация Innertube с поддержкой куки и прокси (если заданы)
 async function getYt() {
   if (!_yt) {
     const config = { retrieve_player: true };
     if (process.env.YT_COOKIES) {
       config.cookie = parseNetscapeCookies(process.env.YT_COOKIES);
+    }
+    // Если в системе прописан прокси, передаем его в Innertube
+    if (process.env.YT_PROXY) {
+      config.proxy = {
+        url: process.env.YT_PROXY
+      };
     }
     _yt = await Innertube.create(config);
   }
@@ -109,26 +115,30 @@ function getDirectUrl(url) {
       return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
     }
 
-    // Динамическая адаптация параметров под наличие куки:
-    // 1. Если куки загружены (они экспортированы из десктопного браузера) -> используем web-клиент и десктопный UA.
-    // 2. Если куки нет -> маскируемся под мобильный клиент (ios, android), которые реже требуют капчу.
+    // Использование клиента web_creator, так как он обходит защиту "Sign in to confirm..." в большинстве случаев
     const clientType = cookiesPath 
-      ? 'youtube:player_client=web,tv' 
-      : 'youtube:player_client=ios,android,tv';
+      ? 'youtube:player_client=web,web_creator,tv' 
+      : 'youtube:player_client=ios,android,web_creator';
 
     const userAgent = cookiesPath
       ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
       : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
     const args = [
-      '--extractor-args', `${clientType};player_skip_fallback=info`,
+      '--extractor-args', `${clientType}`,
       '--user-agent', userAgent,
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
       '--quiet',
       '--no-warnings',
+      '--ignore-no-formats-error',
     ];
+    
+    // Поддержка прокси в yt-dlp, если переменная задана в окружении
+    if (process.env.YT_PROXY) {
+      args.push('--proxy', process.env.YT_PROXY);
+    }
     
     if (cookiesPath) {
       args.push('--cookies', cookiesPath);
