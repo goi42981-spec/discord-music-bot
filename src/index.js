@@ -1,9 +1,9 @@
 import { createServer } from 'http';
 import sodium from 'libsodium-wrappers';
 import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from 'discord.js';
-import { handlePlay } from './commands/play.js';
-import { handleSkip } from './commands/skip.js';
-import { handleCancel } from './commands/cancel.js';
+import { handlePlay } from './src/commands/play.js';
+import { handleSkip } from './src/commands/skip.js';
+import { handleCancel } from './src/commands/cancel.js';
 
 await sodium.ready;
 
