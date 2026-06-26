@@ -231,3 +231,4 @@ export function cancelQueue(guildId) {
   queue.tracks = [];
   queue.player?.stop(true);
   return true;
+}
