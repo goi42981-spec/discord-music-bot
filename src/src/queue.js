@@ -96,7 +96,6 @@ export async function getPlaylistInfo(url) {
     .map(v => {
       const id = v.content_id;
       const title = v.metadata?.title?.text ?? v.metadata?.title ?? id;
-      // ИСПРАВЛЕНО: было ?id=${id}, что ломало структуру ссылки для yt-dlp. Изменено на ?v=${id}
       return { id, title, url: `https://www.youtube.com/watch?v=${id}` };
     });
   if (entries.length === 0) throw new Error('Плейлист пустой или недоступен');
@@ -110,20 +109,24 @@ function getDirectUrl(url) {
       return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
     }
 
-    // Использование клиента "ios,android" вместо "web"
+    // Оптимизированный набор аргументов для минимизации вероятности детекции ботов:
+    // 1. Пробуем перебирать клиенты по приоритету (ios -> android -> tv -> web).
+    // 2. Добавляем фейковый User-Agent, чтобы не идентифицировать себя как робот-скрипт.
     const args = [
-      '--extractor-args', 'youtube:player_client=ios,android',
+      '--extractor-args', 'youtube:player_client=ios,android,tv;player_skip_fallback=info',
+      '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
       '--quiet',
       '--no-warnings',
     ];
+    
     if (cookiesPath) {
       args.push('--cookies', cookiesPath);
     }
     
-    // Ссылка ВСЕГДА должна идти самым последним аргументом
+    // Ссылка идет последней
     args.push(url);
     
     const proc = spawn('yt-dlp', args);
