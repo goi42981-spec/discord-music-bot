@@ -4,15 +4,23 @@ const YOUTUBE_URL_RE = /(?:youtube\.com\/(?:watch\?|shorts\/|playlist)|youtu\.be
 const YOUTUBE_PLAYLIST_ONLY_RE = /youtube\.com\/playlist/;
 
 export async function handlePlay(interaction) {
+  if (Date.now() - interaction.createdTimestamp > 2500) return;
+
   const url = interaction.options.getString('url');
   if (!YOUTUBE_URL_RE.test(url)) {
-    return interaction.reply({ content: '❌ Пожалуйста, отправь ссылку на YouTube.', ephemeral: true });
+    return interaction.reply({ content: '❌ Пожалуйста, отправь ссылку на YouTube.', flags: 64 });
   }
   const voiceChannel = interaction.member?.voice?.channel;
   if (!voiceChannel) {
-    return interaction.reply({ content: '❌ Ты должен находиться в голосовом канале!', ephemeral: true });
+    return interaction.reply({ content: '❌ Ты должен находиться в голосовом канале!', flags: 64 });
   }
-  await interaction.deferReply();
+
+  try {
+    await interaction.deferReply();
+  } catch {
+    return;
+  }
+
   try {
     const isPlaylistOnly = YOUTUBE_PLAYLIST_ONLY_RE.test(url);
     const hasListParam = /[?&]list=/.test(url);
