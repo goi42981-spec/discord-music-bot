@@ -9,12 +9,20 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
-import { Readable } from 'stream';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
 
 let _yt = null;
 async function getYt() {
   if (!_yt) _yt = await Innertube.create({ retrieve_player: true });
   return _yt;
+}
+
+let cookiesPath = null;
+if (process.env.YT_COOKIES) {
+  cookiesPath = join('/tmp', 'yt-cookies.txt');
+  writeFileSync(cookiesPath, process.env.YT_COOKIES);
+  console.log('✅ YouTube cookies загружены.');
 }
 
 function extractVideoId(url) {
@@ -56,18 +64,37 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
+function getDirectUrl(url) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '--extractor-args', 'youtube:player_client=android,web',
+      '--no-playlist',
+      '-f', 'bestaudio/best',
+      '--get-url',
+      '--quiet',
+    ];
+    if (cookiesPath) args.push('--cookies', cookiesPath);
+    args.push(url);
+    const proc = spawn('yt-dlp', args);
+    let data = '';
+    let errData = '';
+    proc.stdout.on('data', (d) => { data += d; });
+    proc.stderr.on('data', (d) => { errData += d; });
+    proc.on('close', (code) => {
+      const directUrl = data.trim().split('\n')[0];
+      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
+      else resolve(directUrl);
+    });
+    proc.on('error', reject);
+  });
+}
+
 async function createStream(url) {
-  const yt = await getYt();
-  const videoId = extractVideoId(url);
-  const webStream = await yt.download(videoId, { type: 'audio', quality: 'best' });
-  const nodeStream = Readable.fromWeb(webStream);
+  const directUrl = await getDirectUrl(url);
   const ffmpeg = spawn('ffmpeg', [
-    '-i', 'pipe:0',
-    '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+    '-i', directUrl, '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
   ]);
-  nodeStream.pipe(ffmpeg.stdin);
-  nodeStream.on('error', (err) => { console.error('[stream error]', err.message); ffmpeg.stdin.end(); });
-  ffmpeg.stdin.on('error', () => {});
   ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
   ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
   return ffmpeg.stdout;
