@@ -132,5 +132,18 @@ function getQueue(guildId) {
       textChannel: null,
       playing: false,
     });
+    export function cancelQueue(guildId) {
+  const queue = queues.get(guildId);
+  if (!queue) return false;
+  queue.tracks = [];
+  if (queue.player) {
+    try { queue.player.stop(true); } catch {}
+  }
+  queue.playing = false;
+  setTimeout(() => {
+    deleteQueue(guildId);
+  }, 1000);
+  return true;
+}
   }
   return
