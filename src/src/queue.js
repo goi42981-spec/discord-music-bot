@@ -13,7 +13,14 @@ import { writeFileSync, existsSync } from 'fs';
 
 const COOKIES_PATH = '/tmp/yt-cookies.txt';
 if (process.env.YOUTUBE_COOKIES) {
-  writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+  try {
+    writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+    console.log('✅ Куки записаны, длина:', process.env.YOUTUBE_COOKIES.length);
+  } catch(e) {
+    console.error('❌ Ошибка записи куков:', e.message);
+  }
+} else {
+  console.log('⚠️ YOUTUBE_COOKIES не найден в переменных окружения');
 }
 
 let _yt = null;
