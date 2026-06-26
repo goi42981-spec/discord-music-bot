@@ -17,7 +17,9 @@ let _yt = null;
 // Парсер Netscape Cookie File в стандартную строку HTTP Cookie Header
 function parseNetscapeCookies(cookieText) {
   if (!cookieText) return '';
-  return cookieText
+  // Обрабатываем возможные экранированные переносы строк перед парсингом
+  const cleanText = cookieText.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+  return cleanText
     .split('\n')
     .map(line => line.trim())
     .filter(line => line && !line.startsWith('#'))
@@ -61,8 +63,16 @@ if (process.env.YT_COOKIES) {
       mkdirSync(tempDir, { recursive: true });
     }
     cookiesPath = join(tempDir, 'yt-cookies.txt');
-    writeFileSync(cookiesPath, process.env.YT_COOKIES);
-    console.log('✅ YouTube cookies успешно загружены в среду окружения и сохранены в файл.');
+    
+    // ВАЖНО: заменяем текстовые "\n" на настоящие символы переноса строки.
+    // Часто при копировании кук в ENV-панели они сохраняются как "line1\nline2" в виде одной строки.
+    const cleanCookiesText = process.env.YT_COOKIES
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r');
+
+    writeFileSync(cookiesPath, cleanCookiesText);
+    console.log('✅ YouTube cookies успешно загружены в среду окружения, отформатированы и сохранены в файл.');
   } catch (err) {
     console.error('❌ Ошибка при сохранении куки-файла:', err.message);
   }
@@ -115,14 +125,12 @@ function getDirectUrl(url) {
       return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
     }
 
-    // Использование клиента web_creator, так как он обходит защиту "Sign in to confirm..." в большинстве случаев
-    const clientType = cookiesPath 
-      ? 'youtube:player_client=web,web_creator,tv' 
-      : 'youtube:player_client=ios,android,web_creator';
+    // Революционный обход детекции ботов: используем embedded-версии клиентов YouTube.
+    // Клиенты 'android_embedded' и 'web_embedded' предназначены для iframe воспроизведения
+    // и практически никогда не выдают капчу или требование войти в аккаунт.
+    const clientType = 'youtube:player_client=android_embedded,web_embedded,tvhtml5,mediaconnect';
 
-    const userAgent = cookiesPath
-      ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-      : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
     const args = [
       '--extractor-args', `${clientType}`,
