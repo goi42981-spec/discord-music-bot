@@ -9,11 +9,16 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
-import { Readable } from 'stream';
+import { writeFileSync, existsSync } from 'fs';
+
+const COOKIES_PATH = '/tmp/yt-cookies.txt';
+if (process.env.YOUTUBE_COOKIES) {
+  writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+}
 
 let _yt = null;
 async function getYt() {
-  if (!_yt) _yt = await Innertube.create({ retrieve_player: true, generate_session_locally: true });
+  if (!_yt) _yt = await Innertube.create({ retrieve_player: true });
   return _yt;
 }
 
@@ -56,34 +61,40 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-async function createStream(videoUrl) {
-  const yt = await getYt();
-  const videoId = extractVideoId(videoUrl);
-  if (!videoId) throw new Error('Не удалось извлечь ID видео.');
+function getDirectUrl(url) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '--no-playlist',
+      '-f', 'bestaudio/best',
+      '--get-url',
+      '--quiet',
+    ];
+    if (existsSync(COOKIES_PATH)) {
+      args.push('--cookies', COOKIES_PATH);
+    }
+    args.push(url);
 
- const webStream = await yt.download(videoId, {
-    type: 'audio',
-    quality: 'bestefficiency',
-    client: 'TV_EMBEDDED',
+    const proc = spawn('yt-dlp', args);
+    let data = '', errData = '';
+    proc.stdout.on('data', (d) => { data += d; });
+    proc.stderr.on('data', (d) => { errData += d; });
+    proc.on('close', (code) => {
+      const directUrl = data.trim().split('\n')[0];
+      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
+      else resolve(directUrl);
+    });
+    proc.on('error', reject);
   });
+}
 
-  const nodeStream = Readable.fromWeb(webStream);
-
+async function createStream(url) {
+  const directUrl = await getDirectUrl(url);
   const ffmpeg = spawn('ffmpeg', [
-    '-i', 'pipe:0',
-    '-vn',
-    '-f', 's16le',
-    '-ar', '48000',
-    '-ac', '2',
-    '-loglevel', 'error',
-    'pipe:1',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+    '-i', directUrl, '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
   ]);
-
-  nodeStream.pipe(ffmpeg.stdin);
-  nodeStream.on('error', (err) => { console.error('[stream error]', err.message); ffmpeg.stdin.destroy(); });
   ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
   ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
-
   return ffmpeg.stdout;
 }
 
