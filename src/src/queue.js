@@ -55,28 +55,34 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-async function getStreamUrl(url) {
-  const yt = await getYt();
-  const videoId = extractVideoId(url);
-  if (!videoId) throw new Error('Не удалось извлечь ID видео.');
-  const info = await yt.getInfo(videoId);
-  const formats = info.streaming_data?.adaptive_formats ?? [];
-  const audioFormats = formats.filter(f => f.mime_type?.startsWith('audio/'));
-  if (audioFormats.length === 0) throw new Error('Нет аудио форматов.');
-  audioFormats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
-  const best = audioFormats[0];
-  const streamUrl = best.url;
-  if (!streamUrl) throw new Error('URL аудио не найден.');
-  console.log('[stream] youtubei URL получен');
-  return streamUrl;
+function getDirectUrl(url) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('yt-dlp', [
+      '--extractor-args', 'youtube:player_client=android',
+      '--no-playlist',
+      '-f', 'bestaudio/best',
+      '--get-url',
+      '--quiet',
+      url,
+    ]);
+    let data = '';
+    let errData = '';
+    proc.stdout.on('data', (d) => { data += d; });
+    proc.stderr.on('data', (d) => { errData += d; });
+    proc.on('close', (code) => {
+      const directUrl = data.trim().split('\n')[0];
+      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
+      else resolve(directUrl);
+    });
+    proc.on('error', reject);
+  });
 }
 
 async function createStream(url) {
-  const audioUrl = await getStreamUrl(url);
+  const directUrl = await getDirectUrl(url);
   const ffmpeg = spawn('ffmpeg', [
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-    '-i', audioUrl,
-    '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
+    '-i', directUrl, '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
   ]);
   ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
   ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
@@ -110,7 +116,6 @@ async function playNext(guildId) {
   }
   const track = queue.tracks.shift();
   queue.playing = true;
-  console.log(`▶️ [${guildId}] Играет: ${track.title}`);
   queue.textChannel?.send(`▶️ **Сейчас играет:** ${track.title}`).catch(() => {});
   try {
     const stream = await createStream(track.url);
@@ -164,9 +169,3 @@ export function skipCurrent(guildId) {
 export function cancelQueue(guildId) {
   const queue = queues.get(guildId);
   if (!queue) return false;
-  queue.tracks = [];
-  try { queue.player?.stop(true); } catch {}
-  queue.playing = false;
-  setTimeout(() => deleteQueue(guildId), 1000);
-  return true;
-}
