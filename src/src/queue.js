@@ -96,7 +96,8 @@ export async function getPlaylistInfo(url) {
     .map(v => {
       const id = v.content_id;
       const title = v.metadata?.title?.text ?? v.metadata?.title ?? id;
-      return { id, title, url: `https://www.youtube.com/watch?id=${id}` };
+      // ИСПРАВЛЕНО: было ?id=${id}, что ломало структуру ссылки для yt-dlp. Изменено на ?v=${id}
+      return { id, title, url: `https://www.youtube.com/watch?v=${id}` };
     });
   if (entries.length === 0) throw new Error('Плейлист пустой или недоступен');
   const playlistTitle = playlist.info?.title?.text ?? playlist.info?.title ?? 'Плейлист';
@@ -105,7 +106,11 @@ export async function getPlaylistInfo(url) {
 
 function getDirectUrl(url) {
   return new Promise((resolve, reject) => {
-    // Использование клиента "ios,android" вместо "web", так как мобильные API реже блокируются капчей
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return reject(new Error('Передан неверный или пустой URL для yt-dlp'));
+    }
+
+    // Использование клиента "ios,android" вместо "web"
     const args = [
       '--extractor-args', 'youtube:player_client=ios,android',
       '--no-playlist',
@@ -117,6 +122,9 @@ function getDirectUrl(url) {
     if (cookiesPath) {
       args.push('--cookies', cookiesPath);
     }
+    
+    // Ссылка ВСЕГДА должна идти самым последним аргументом
+    args.push(url);
     
     const proc = spawn('yt-dlp', args);
     let data = '';
