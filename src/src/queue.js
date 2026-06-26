@@ -14,19 +14,39 @@ import { join } from 'path';
 
 let _yt = null;
 
-// Инициализация Innertube с поддержкой куки (чтобы метаданные тоже не блокировались)
+// Парсер Netscape Cookie File в стандартную строку HTTP Cookie Header
+function parseNetscapeCookies(cookieText) {
+  if (!cookieText) return '';
+  return cookieText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+    .map(line => {
+      const parts = line.split('\t');
+      if (parts.length >= 7) {
+        const name = parts[5];
+        const value = parts[6];
+        return `${name}=${value}`;
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .join('; ');
+}
+
+// Инициализация Innertube с поддержкой куки (преобразованных в валидный заголовок)
 async function getYt() {
   if (!_yt) {
     const config = { retrieve_player: true };
     if (process.env.YT_COOKIES) {
-      config.cookie = process.env.YT_COOKIES;
+      config.cookie = parseNetscapeCookies(process.env.YT_COOKIES);
     }
     _yt = await Innertube.create(config);
   }
   return _yt;
 }
 
-// Запись куки во временный файл для yt-dlp
+// Запись куки во временный файл для yt-dlp (ему нужен именно сырой Netscape-формат)
 let cookiesPath = null;
 if (process.env.YT_COOKIES) {
   try {
@@ -76,7 +96,7 @@ export async function getPlaylistInfo(url) {
     .map(v => {
       const id = v.content_id;
       const title = v.metadata?.title?.text ?? v.metadata?.title ?? id;
-      return { id, title, url: `https://www.youtube.com/watch?v=${id}` };
+      return { id, title, url: `https://www.youtube.com/watch?id=${id}` };
     });
   if (entries.length === 0) throw new Error('Плейлист пустой или недоступен');
   const playlistTitle = playlist.info?.title?.text ?? playlist.info?.title ?? 'Плейлист';
@@ -211,4 +231,3 @@ export function cancelQueue(guildId) {
   queue.tracks = [];
   queue.player?.stop(true);
   return true;
-}
