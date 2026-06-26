@@ -9,6 +9,7 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
+import { Readable } from 'stream';
 
 let _yt = null;
 async function getYt() {
@@ -55,20 +56,18 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-async function getDirectUrl(url) {
+async function createStream(url) {
   const yt = await getYt();
   const videoId = extractVideoId(url);
-  const info = await yt.getInfo(videoId);
-  const format = info.chooseFormat({ type: 'audio', quality: 'best' });
-  return format.decipher(yt.session.player);
-}
-
-async function createStream(url) {
-  const directUrl = await getDirectUrl(url);
+  const webStream = await yt.download(videoId, { type: 'audio', quality: 'best' });
+  const nodeStream = Readable.fromWeb(webStream);
   const ffmpeg = spawn('ffmpeg', [
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-    '-i', directUrl, '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
+    '-i', 'pipe:0',
+    '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
   ]);
+  nodeStream.pipe(ffmpeg.stdin);
+  nodeStream.on('error', (err) => { console.error('[stream error]', err.message); ffmpeg.stdin.end(); });
+  ffmpeg.stdin.on('error', () => {});
   ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
   ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
   return ffmpeg.stdout;
