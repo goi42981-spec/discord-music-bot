@@ -117,4 +117,56 @@ async function playNext(guildId) {
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     queue.player.play(resource);
   } catch (err) {
-    console.error
+    console.error('Ошибка стрима:', err.message);
+    queue.textChannel?.send(`❌ Не удалось воспроизвести: **${track.title}**. Пропускаю...`).catch(() => {});
+    playNext(guildId);
+  }
+}
+
+export async function addToQueue(interaction, voiceChannel, tracks) {
+  const guildId = interaction.guild.id;
+  const queue = getQueue(guildId);
+  queue.textChannel = interaction.channel;
+  if (!queue.connection) {
+    queue.connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId, adapterCreator: interaction.guild.voiceAdapterCreator });
+    queue.connection.on('error', (err) => console.error('[voice error]', err.message));
+    try {
+      await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
+    } catch (err) {
+      queue.connection.destroy();
+      queues.delete(guildId);
+      throw new Error('Не удалось подключиться к голосовому каналу.');
+    }
+    queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        await Promise.race([
+          entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+      } catch { deleteQueue(guildId); }
+    });
+    queue.player = createAudioPlayer();
+    queue.connection.subscribe(queue.player);
+    queue.player.on(AudioPlayerStatus.Idle, () => playNext(guildId));
+    queue.player.on('error', (err) => { console.error('Ошибка плеера:', err.message); playNext(guildId); });
+  }
+  for (const track of tracks) queue.tracks.push(track);
+  if (!queue.playing) playNext(guildId);
+}
+
+export function skipCurrent(guildId) {
+  const queue = queues.get(guildId);
+  if (!queue || !queue.player) return false;
+  queue.player.stop();
+  return true;
+}
+
+export function cancelQueue(guildId) {
+  const queue = queues.get(guildId);
+  if (!queue) return false;
+  queue.tracks = [];
+  try { queue.player?.stop(true); } catch {}
+  queue.playing = false;
+  setTimeout(() => deleteQueue(guildId), 1000);
+  return true;
+}
