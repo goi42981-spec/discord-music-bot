@@ -61,9 +61,10 @@ async function createStream(videoUrl) {
   const videoId = extractVideoId(videoUrl);
   if (!videoId) throw new Error('Не удалось извлечь ID видео.');
 
-  const webStream = await yt.download(videoId, {
+ const webStream = await yt.download(videoId, {
     type: 'audio',
     quality: 'bestefficiency',
+    client: 'TV_EMBEDDED',
   });
 
   const nodeStream = Readable.fromWeb(webStream);
