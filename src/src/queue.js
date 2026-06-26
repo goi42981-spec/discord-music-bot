@@ -169,3 +169,7 @@ export function skipCurrent(guildId) {
 export function cancelQueue(guildId) {
   const queue = queues.get(guildId);
   if (!queue) return false;
+  queue.tracks = [];
+  queue.player?.stop(true);
+  return true;
+}
