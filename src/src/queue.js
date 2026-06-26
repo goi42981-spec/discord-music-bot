@@ -5,9 +5,11 @@ import {
   AudioPlayerStatus,
   VoiceConnectionStatus,
   entersState,
+  StreamType,
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
-import playdl from 'play-dl';
+import { spawn } from 'child_process';
+import { Readable } from 'stream';
 
 let _yt = null;
 async function getYt() {
@@ -54,6 +56,36 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
+async function createStream(videoUrl) {
+  const yt = await getYt();
+  const videoId = extractVideoId(videoUrl);
+  if (!videoId) throw new Error('Не удалось извлечь ID видео.');
+
+  const webStream = await yt.download(videoId, {
+    type: 'audio',
+    quality: 'bestefficiency',
+  });
+
+  const nodeStream = Readable.fromWeb(webStream);
+
+  const ffmpeg = spawn('ffmpeg', [
+    '-i', 'pipe:0',
+    '-vn',
+    '-f', 's16le',
+    '-ar', '48000',
+    '-ac', '2',
+    '-loglevel', 'error',
+    'pipe:1',
+  ]);
+
+  nodeStream.pipe(ffmpeg.stdin);
+  nodeStream.on('error', (err) => { console.error('[stream error]', err.message); ffmpeg.stdin.destroy(); });
+  ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
+  ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
+
+  return ffmpeg.stdout;
+}
+
 const queues = new Map();
 
 function getQueue(guildId) {
@@ -81,14 +113,14 @@ async function playNext(guildId) {
   }
   const track = queue.tracks.shift();
   queue.playing = true;
-  queue.textChannel?.send(`▶️ **Сейчас играет оч крутой трек:** ${track.title}`).catch(() => {});
+  queue.textChannel?.send(`▶️ **Сейчас играет:** ${track.title}`).catch(() => {});
   try {
-    const stream = await playdl.stream(track.url, { quality: 2 });
-    const resource = createAudioResource(stream.stream, { inputType: stream.type });
+    const stream = await createStream(track.url);
+    const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     queue.player.play(resource);
   } catch (err) {
     console.error('Ошибка стрима:', err.message);
-    queue.textChannel?.send(`❌ Не удалось воспроизвести обидно: **${track.title}**. Пропускаю...`).catch(() => {});
+    queue.textChannel?.send(`❌ Не удалось воспроизвести: **${track.title}**. Пропускаю...`).catch(() => {});
     playNext(guildId);
   }
 }
