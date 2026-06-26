@@ -9,6 +9,12 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
+import { writeFileSync, existsSync } from 'fs';
+
+const COOKIES_PATH = '/tmp/yt-cookies.txt';
+if (process.env.YOUTUBE_COOKIES) {
+  writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+}
 
 let _yt = null;
 async function getYt() {
@@ -57,22 +63,25 @@ export async function getPlaylistInfo(url) {
 
 function getDirectUrl(url) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('yt-dlp', [
+    const args = [
       '--extractor-args', 'youtube:player_client=android',
       '--no-playlist',
       '-f', 'bestaudio/best',
       '--get-url',
       '--quiet',
-      url,
-    ]);
+    ];
+    if (existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
+    args.push(url);
+
+    const proc = spawn('yt-dlp', args);
     let data = '';
     let errData = '';
     proc.stdout.on('data', (d) => { data += d; });
     proc.stderr.on('data', (d) => { errData += d; });
     proc.on('close', (code) => {
       const directUrl = data.trim().split('\n')[0];
-      if (code !== 0 || !directUrl) reject(new Error(errData.trim() || 'yt-dlp failed'));
-      else resolve(directUrl);
+      if (directUrl) resolve(directUrl);
+      else reject(new Error(errData.trim() || 'yt-dlp failed'));
     });
     proc.on('error', reject);
   });
