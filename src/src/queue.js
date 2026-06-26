@@ -9,12 +9,6 @@ import {
 } from '@discordjs/voice';
 import { Innertube } from 'youtubei.js';
 import { spawn } from 'child_process';
-import { writeFileSync, existsSync } from 'fs';
-
-const COOKIES_PATH = '/tmp/yt-cookies.txt';
-if (process.env.YOUTUBE_COOKIES) {
-  writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
-}
 
 let _yt = null;
 async function getYt() {
@@ -61,38 +55,29 @@ export async function getPlaylistInfo(url) {
   return { title: playlistTitle, entries };
 }
 
-function getDirectUrl(url) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '--extractor-args', 'youtube:player_client=android',
-      '--no-playlist',
-      '-f', 'bestaudio/best',
-      '--get-url',
-      '--quiet',
-    ];
-    if (existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
-    args.push(url);
-
-    const proc = spawn('yt-dlp', args);
-    let data = '';
-    let errData = '';
-    proc.stdout.on('data', (d) => { data += d; });
-    proc.stderr.on('data', (d) => { errData += d; });
-    proc.on('close', (code) => {
-      const directUrl = data.trim().split('\n')[0];
-      if (directUrl) resolve(directUrl);
-      else reject(new Error(errData.trim() || 'yt-dlp failed'));
-    });
-    proc.on('error', reject);
+async function getCobaltUrl(url) {
+  const res = await fetch('https://api.cobalt.tools/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'best' }),
   });
+  if (!res.ok) throw new Error(`cobalt.tools вернул ${res.status}`);
+  const data = await res.json();
+  console.log('[cobalt] статус:', data.status);
+  if (data.url) return data.url;
+  throw new Error(`cobalt.tools: неожиданный ответ: ${JSON.stringify(data)}`);
 }
 
-async function createYtdlpStream(url) {
-  const directUrl = await getDirectUrl(url);
+async function createStream(url) {
+  const audioUrl = await getCobaltUrl(url);
   console.log('[stream] URL получен, запускаю ffmpeg...');
   const ffmpeg = spawn('ffmpeg', [
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-    '-i', directUrl, '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
+    '-i', audioUrl,
+    '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', '-loglevel', 'error', 'pipe:1',
   ]);
   ffmpeg.stderr.on('data', (d) => { const msg = d.toString().trim(); if (msg) console.error('[ffmpeg]', msg); });
   ffmpeg.on('error', (err) => console.error('[ffmpeg spawn]', err.message));
@@ -129,7 +114,7 @@ async function playNext(guildId) {
   console.log(`▶️ [${guildId}] Играет: ${track.title}`);
   queue.textChannel?.send(`▶️ **Сейчас играет:** ${track.title}`).catch(() => {});
   try {
-    const stream = await createYtdlpStream(track.url);
+    const stream = await createStream(track.url);
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     queue.player.play(resource);
   } catch (err) {
