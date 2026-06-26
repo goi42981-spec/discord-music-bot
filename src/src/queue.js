@@ -13,7 +13,7 @@ import { Readable } from 'stream';
 
 let _yt = null;
 async function getYt() {
-  if (!_yt) _yt = await Innertube.create({ retrieve_player: true });
+  if (!_yt) _yt = await Innertube.create({ retrieve_player: true, generate_session_locally: true });
   return _yt;
 }
 
